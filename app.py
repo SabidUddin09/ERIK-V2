@@ -1,9 +1,9 @@
 import streamlit as st
 from googlesearch import search
-import wikipedia
+import requests
+from bs4 import BeautifulSoup
 import fitz  # PyMuPDF
 import docx
-import os
 
 # ---------------------------
 # Page Config & Intro
@@ -15,7 +15,7 @@ st.markdown("""
 **Developed by: Sabid**  
 
 Welcome to **ERIK**, your all-in-one academic assistant.  
-It combines Google Search, Wikipedia, document analysis, quiz generation, flashcards, and Khan Academy references — to make studying smarter and faster.  
+It automatically generates answers, analyzes topics, creates quizzes, flashcards, and links to Khan Academy resources — making studying smarter and faster.  
 """)
 
 # ---------------------------
@@ -31,7 +31,7 @@ if "notes" not in st.session_state:
     st.session_state["notes"] = ""
 
 # ---------------------------
-# Authentication Functions
+# Authentication
 # ---------------------------
 def signup(username, password):
     if username in st.session_state["users"]:
@@ -49,20 +49,6 @@ def login(username, password):
 # ---------------------------
 # Helpers
 # ---------------------------
-def google_search(query, lang="en"):
-    try:
-        results = list(search(query, num_results=2, lang=lang))
-        return "\n".join(results) if results else "❌ No results found."
-    except Exception as e:
-        return f"⚠️ Error: {str(e)}"
-
-def wikipedia_search(query, lang="en"):
-    try:
-        wikipedia.set_lang("bn" if lang=="bn" else "en")
-        return wikipedia.summary(query, sentences=2)
-    except:
-        return "❌ No results found."
-
 def extract_text_from_file(uploaded_file):
     text = ""
     if uploaded_file.type == "application/pdf":
@@ -76,6 +62,28 @@ def extract_text_from_file(uploaded_file):
     else:
         text = uploaded_file.read().decode("utf-8")
     return text
+
+def google_auto_answer(query):
+    """Search Google and return a concise paragraph as answer"""
+    try:
+        results = list(search(query, num_results=3))
+        if not results:
+            return "❌ No results found."
+
+        for url in results:
+            try:
+                response = requests.get(url, timeout=5)
+                soup = BeautifulSoup(response.text, "html.parser")
+                paragraphs = soup.find_all("p")
+                for p in paragraphs:
+                    text = p.get_text().strip()
+                    if len(text.split()) > 10:
+                        return text + f"\n\n🔗 Source: {url}"
+            except:
+                continue
+        return f"Couldn't extract details. Check here: {results[0]}"
+    except Exception as e:
+        return f"⚠️ Error: {str(e)}"
 
 # ---------------------------
 # Login / Signup
@@ -107,7 +115,7 @@ else:
     option = st.sidebar.radio("Choose Feature", [
         "Introduction", "Doubt Solver", "Topic Analyzer",
         "Document Upload", "Quiz Generator", "Flashcards",
-        "Wikipedia Search", "Khan Academy Reference"
+        "Khan Academy Reference"
     ])
 
     # ---------------------------
@@ -117,30 +125,23 @@ else:
         st.subheader("👋 Meet ERIK")
         st.write("""
         ERIK (**Exceptional Resources & Intelligence Kernal**) is designed to help students with:
+        - Automatically answering academic questions  
         - Breaking down complex topics  
-        - Solving academic doubts instantly  
         - Creating quizzes & flashcards  
         - Extracting study notes from documents  
-        - Searching the web & Wikipedia  
         - Linking to Khan Academy resources  
         """)
 
     # ---------------------------
-    # Doubt Solver
+    # Doubt Solver (Automated)
     # ---------------------------
     elif option == "Doubt Solver":
         query = st.text_input("Ask your academic question (Bangla/English):")
-        source = st.radio("Answer Source", ["Google", "Wikipedia", "Khan Academy"])
         if st.button("Get Answer"):
-            lang = "bn" if any("\u0980" <= ch <= "\u09FF" for ch in query) else "en"
-            if source == "Google":
-                answer = google_search(query, lang)
-            elif source == "Wikipedia":
-                answer = wikipedia_search(query, lang)
-            else:
-                answer = f"🔗 Visit Khan Academy: https://www.khanacademy.org/search?search_again=1&page_search_query={query.replace(' ', '+')}"
-            st.session_state["chat_history"].append(("You", query))
-            st.session_state["chat_history"].append(("ERIK", answer))
+            if query:
+                answer = google_auto_answer(query)
+                st.session_state["chat_history"].append(("You", query))
+                st.session_state["chat_history"].append(("ERIK", answer))
 
     # ---------------------------
     # Topic Analyzer
@@ -196,20 +197,6 @@ else:
                     st.write(f"**A{i+1}:** {s.strip()}")
         else:
             st.warning("⚠️ Upload notes first!")
-
-    # ---------------------------
-    # Wikipedia Search
-    # ---------------------------
-    elif option == "Wikipedia Search":
-        query = st.text_input("Search Wikipedia:")
-        if st.button("Get Wiki"):
-            if query:
-                try:
-                    summary = wikipedia.summary(query, sentences=3)
-                    st.subheader("📖 Wikipedia Summary")
-                    st.write(summary)
-                except:
-                    st.error("No results found.")
 
     # ---------------------------
     # Khan Academy Reference
