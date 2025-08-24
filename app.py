@@ -1,188 +1,217 @@
-import os
-import re
-import requests
 import streamlit as st
+from googlesearch import search
+import requests
+from bs4 import BeautifulSoup
+import fitz  # PyMuPDF
+import docx
+import re
 
-# Optional imports
-def safe_import(modname, obj=None):
-    try:
-        module = __import__(modname, fromlist=[obj] if obj else [])
-        return getattr(module, obj) if obj else module
-    except Exception:
-        return None
+# ---------------------------
+# Page Config
+# ---------------------------
+st.set_page_config(page_title="ERIK - Exceptional Resources & Intelligence Kernal", layout="wide")
+st.title("🤖 ERIK - Exceptional Resources & Intelligence Kernal")
+st.markdown("""
+**Developed by: Sabid**
 
-# Libraries
-DDGS = safe_import("duckduckgo_search", "DDGS")
-bs4 = safe_import("bs4")
-BeautifulSoup = getattr(bs4, "BeautifulSoup") if bs4 else None
-langdetect = safe_import("langdetect")
-detect_lang = getattr(langdetect, "detect") if langdetect else None
-ollama = safe_import("ollama")
-gpt4all = safe_import("gpt4all")
-transformers = safe_import("transformers")
-pipeline = getattr(transformers, "pipeline", None) if transformers else None
+Welcome to **ERIK**, your all-in-one academic assistant!  
+It helps you study smarter by automatically generating answers, analyzing topics, creating quizzes, flashcards, and extracting notes from documents.
+""")
 
-# ---------------- Streamlit UI ----------------
-st.set_page_config(page_title="E.R.I.K.", page_icon="🤖", layout="wide")
-st.title("🤖 E.R.I.K. – Local Chatbot")
-st.write("Exceptional Resources & Intelligence Kernel — Offline/Local Chatbot (No OpenAI API)")
+# ---------------------------
+# Session State Setup
+# ---------------------------
+if "users" not in st.session_state:
+    st.session_state["users"] = {"admin": "1234"}  # default user
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
+if "notes" not in st.session_state:
+    st.session_state["notes"] = ""
 
-# Sidebar settings
-st.sidebar.header("⚙️ Settings")
-model_choice = st.sidebar.selectbox(
-    "Local model backend:",
-    ["Ollama (Mistral/Llama)", "GPT4All (offline)", "FLAN-T5 (CPU fallback)"]
-)
-use_web = st.sidebar.checkbox("Use web search", value=True)
-enable_bn_translate = st.sidebar.checkbox("Enable Bangla↔English translation", value=False)
-max_tokens = st.sidebar.slider("Max new tokens", 64, 1024, 256)
-temperature = st.sidebar.slider("Creativity (temperature)", 0.0, 1.5, 0.7)
-top_p = st.sidebar.slider("Top-p sampling", 0.1, 1.0, 0.9)
+# ---------------------------
+# Authentication
+# ---------------------------
+def signup(username, password):
+    if username in st.session_state["users"]:
+        return False
+    st.session_state["users"][username] = password
+    return True
 
-st.sidebar.info("Tip: For best quality, install Ollama and pull a model: `ollama pull mistral`")
+def login(username, password):
+    if username in st.session_state["users"] and st.session_state["users"][username] == password:
+        st.session_state["logged_in"] = True
+        st.session_state["username"] = username
+        return True
+    return False
 
-# ---------------- Session state ----------------
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-# ---------------- Helper functions ----------------
-def fetch_page_text(url, timeout=7):
-    try:
-        r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code != 200:
-            return ""
-        html_text = r.text
-        if BeautifulSoup:
-            soup = BeautifulSoup(html_text, "html.parser")
-            for tag in soup(["script", "style", "noscript"]):
-                tag.decompose()
-            text = soup.get_text(separator=" ")
-        else:
-            text = re.sub("<[^<]+?>", " ", html_text)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()[:8000]
-    except Exception:
-        return ""
-
-def ddg_search(query, max_results=3):
-    results = []
-    if not DDGS:
-        return results
-    try:
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, safesearch="moderate", max_results=max_results):
-                results.append({
-                    "title": r.get("title", ""),
-                    "href": r.get("href", ""),
-                    "snippet": r.get("body", ""),
-                    "source": r.get("source", ""),
-                })
-    except Exception:
-        pass
-    return results
-
-def build_prompt(user_query, retrieved_text=""):
-    sys = "You are E.R.I.K., a helpful, concise assistant."
-    if retrieved_text:
-        context = f"Web info:\n{retrieved_text}\nUse [Source: URL] if needed.\n"
+# ---------------------------
+# Helpers
+# ---------------------------
+def extract_text_from_file(uploaded_file):
+    text = ""
+    if uploaded_file.type == "application/pdf":
+        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        for page in doc:
+            text += page.get_text()
+    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        doc = docx.Document(uploaded_file)
+        for para in doc.paragraphs:
+            text += para.text + "\n"
     else:
-        context = ""
-    return f"{sys}\n{context}\nUser question:\n{user_query}\nAnswer:"
+        text = uploaded_file.read().decode("utf-8")
+    return text
 
-def looks_bangla(text):
-    if detect_lang:
-        try:
-            return detect_lang(text) == "bn"
-        except:
-            return False
-    return bool(re.search(r"[\u0980-\u09FF]", text))
+def detect_language(text):
+    """Return 'bn' if Bangla characters found, else 'en'"""
+    if re.search("[\u0980-\u09FF]", text):
+        return 'bn'
+    return 'en'
 
-def translate(text, direction="bn2en"):
-    if not transformers:
-        return text
-    if direction == "bn2en":
-        pipe = pipeline("translation", model="Helsinki-NLP/opus-mt-bn-en")
-    else:
-        pipe = pipeline("translation", model="Helsinki-NLP/opus-mt-en-bn")
-    return pipe(text)[0]["translation_text"]
-
-# ---------------- Model loaders ----------------
-@st.cache_resource
-def load_ollama_model(name="mistral"):
-    if not ollama:
-        raise RuntimeError("Install ollama package")
-    return {"name": name}
-
-@st.cache_resource
-def load_gpt4all_model(path="ggml-gpt4all-j-v1.3-groovy.bin"):
-    if not gpt4all:
-        raise RuntimeError("Install gpt4all package")
-    from gpt4all import GPT4All
-    return GPT4All(path)
-
-@st.cache_resource
-def load_flan_pipeline():
-    if not transformers:
-        raise RuntimeError("Install transformers and torch")
-    return pipeline("text2text-generation", model="google/flan-t5-base")
-
-# ---------------- Generate responses ----------------
-def generate_response(prompt):
+def google_auto_answer(query):
+    """Search Google and return a concise paragraph as answer"""
+    lang = detect_language(query)
     try:
-        if model_choice.startswith("Ollama"):
-            backend = load_ollama_model()
-            resp = ollama.chat(model=backend["name"],
-                               messages=[{"role": "user", "content": prompt}])
-            return resp["message"]["content"].strip()
-        elif model_choice.startswith("GPT4All"):
-            model_path = "ggml-gpt4all-j-v1.3-groovy.bin"
-            model = load_gpt4all_model(model_path)
-            with model.chat_session():
-                return model.generate(prompt, max_tokens=max_tokens, temp=temperature, top_p=top_p).strip()
-        else:
-            pipe = load_flan_pipeline()
-            return pipe(prompt, max_new_tokens=max_tokens, do_sample=True,
-                        temperature=temperature, top_p=top_p)[0]["generated_text"].strip()
+        results = list(search(query, num_results=3))
+        if not results:
+            return "❌ No results found."
+
+        for url in results:
+            try:
+                response = requests.get(url, timeout=5)
+                soup = BeautifulSoup(response.text, "html.parser")
+                paragraphs = soup.find_all("p")
+                for p in paragraphs:
+                    text = p.get_text().strip()
+                    if len(text.split()) > 10:
+                        return text + f"\n\n🔗 Source: {url}"
+            except:
+                continue
+        return f"Couldn't extract details. Check here: {results[0]}"
     except Exception as e:
-        return f"Error generating response: {e}"
+        return f"⚠️ Error: {str(e)}"
 
-# ---------------- Chat UI ----------------
-user_input = st.text_area("💬 Ask anything (Bangla/English supported):", height=120)
-col1, col2 = st.columns([1,1])
-send = col1.button("Send")
-clear = col2.button("Clear Chat")
-
-if clear:
-    st.session_state.history = []
-    st.experimental_rerun()
-
-if send and user_input.strip():
-    st.session_state.history.append({"role": "user", "content": user_input})
-
-    # Optional translation
-    text_for_model = user_input
-    if enable_bn_translate and looks_bangla(user_input):
-        text_for_model = translate(user_input, "bn2en")
-
-    # Optional web search
-    retrieval = ""
-    if use_web:
-        hits = ddg_search(user_input)
-        retrieval = "\n".join([f"{h['title']} - {h['href']}" for h in hits])
-
-    prompt = build_prompt(text_for_model, retrieval)
-    answer = generate_response(prompt)
-
-    # Translate back to Bangla if needed
-    if enable_bn_translate and looks_bangla(user_input):
-        answer = translate(answer, "en2bn")
-
-    st.session_state.history.append({"role": "assistant", "content": answer})
-    st.experimental_rerun()
-
-# Display chat history
-for msg in st.session_state.history:
-    if msg["role"] == "user":
-        st.markdown(f"**🧑 You:** {msg['content']}")
+# ---------------------------
+# Login / Signup
+# ---------------------------
+if not st.session_state["logged_in"]:
+    choice = st.radio("Login / Signup", ["Login", "Signup"])
+    if choice == "Login":
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if login(username, password):
+                st.success(f"✅ Login successful! Welcome, {username}.")
+            else:
+                st.error("❌ Invalid credentials")
     else:
-        st.markdown(f"**🤖 E.R.I.K.:** {msg['content']}")
+        new_user = st.text_input("New Username")
+        new_pass = st.text_input("New Password", type="password")
+        if st.button("Signup"):
+            if signup(new_user, new_pass):
+                st.success("🎉 Signup successful! Login now.")
+            else:
+                st.error("❌ Username already exists!")
+
+# ---------------------------
+# Main App
+# ---------------------------
+else:
+    st.sidebar.success(f"👋 Welcome, {st.session_state['username']}")
+    option = st.sidebar.radio("Choose Feature", [
+        "Introduction", "Doubt Solver", "Topic Analyzer",
+        "Document Upload", "Quiz Generator", "Flashcards"
+    ])
+
+    # ---------------------------
+    # Introduction
+    # ---------------------------
+    if option == "Introduction":
+        st.subheader("👋 Meet ERIK")
+        st.write("""
+        ERIK (**Exceptional Resources & Intelligence Kernal**) is designed to help students with:
+        - Automatically answering academic questions (Bangla + English)
+        - Breaking down complex topics
+        - Creating quizzes & flashcards
+        - Extracting study notes from documents
+        """)
+
+    # ---------------------------
+    # Doubt Solver
+    # ---------------------------
+    elif option == "Doubt Solver":
+        query = st.text_input("Ask your academic question (Bangla/English):")
+        if st.button("Get Answer"):
+            if query:
+                answer = google_auto_answer(query)
+                st.session_state["chat_history"].append(("You", query))
+                st.session_state["chat_history"].append(("ERIK", answer))
+
+    # ---------------------------
+    # Topic Analyzer
+    # ---------------------------
+    elif option == "Topic Analyzer":
+        topic = st.text_input("Enter topic:")
+        if st.button("Analyze"):
+            st.subheader(f"🔎 Topic Breakdown: {topic}")
+            st.markdown(f"""
+            **Key Concepts:**  
+            - Definition of {topic}  
+            - Importance in academics  
+            - Applications  
+
+            **Example Questions:**  
+            1. Define {topic}.  
+            2. What are its applications?  
+            3. Why is it important?  
+            """)
+
+    # ---------------------------
+    # Document Upload
+    # ---------------------------
+    elif option == "Document Upload":
+        uploaded_file = st.file_uploader("Upload PDF, DOCX, or TXT")
+        if uploaded_file:
+            text = extract_text_from_file(uploaded_file)
+            st.session_state["notes"] = text
+            st.subheader("📄 Extracted Notes:")
+            st.text_area("Preview", text[:1000])
+
+    # ---------------------------
+    # Quiz Generator
+    # ---------------------------
+    elif option == "Quiz Generator":
+        if st.session_state["notes"]:
+            st.subheader("📝 Sample Quiz")
+            st.write("**MCQ:** What is the main concept?")
+            st.write("**Short Q:** Explain in 2 lines.")
+            st.write("**Creative Q:** Relate it to real life.")
+        else:
+            st.warning("⚠️ Upload notes first!")
+
+    # ---------------------------
+    # Flashcards
+    # ---------------------------
+    elif option == "Flashcards":
+        if st.session_state["notes"]:
+            st.subheader("📌 Flashcards")
+            sentences = st.session_state["notes"].split(".")
+            for i, s in enumerate(sentences[:5]):
+                if len(s.strip())>5:
+                    st.write(f"**Q{i+1}:** About '{s.strip()[:20]}…'?")
+                    st.write(f"**A{i+1}:** {s.strip()}")
+        else:
+            st.warning("⚠️ Upload notes first!")
+
+    # ---------------------------
+    # Chat History
+    # ---------------------------
+    st.subheader("💬 Chat History")
+    for sender, msg in st.session_state["chat_history"]:
+        st.markdown(f"**{sender}:** {msg}")
+
+    if st.button("Logout"):
+        st.session_state["logged_in"] = False
+        st.session_state["chat_history"] = []
+        st.session_state["notes"] = ""
