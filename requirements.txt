@@ -1,16 +1,6 @@
-# Core packages
-streamlit==1.26.1
-requests==2.32.0
-
-# Local AI backends
-ollama==0.1.0
-gpt4all==1.1.1
-transformers==4.41.0
-torch==2.2.0
-
-# Web search & scraping
-duckduckgo_search==2.6.0
-beautifulsoup4==4.12.2
-
-# Language detection
-langdetect==1.0.9
+streamlit
+googlesearch-python
+requests
+beautifulsoup4
+pymupdf
+python-docx
