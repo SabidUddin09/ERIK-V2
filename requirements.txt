@@ -1,6 +1,6 @@
-ollama==0.1.0          # Ollama লাইব্রেরি
-streamlit==1.26.1      # ওয়েব ইন্টারফেস তৈরি করার জন্য
-numpy==1.27.5          # সায়েন্টিফিক গণনার জন্য
-pandas==2.1.1          # ডেটা হ্যান্ডলিং এর জন্য
-requests==2.32.0       # API/HTTP রিকোয়েস্টের জন্য
-python-dotenv==1.0.1   # .env ফাইল থেকে কনফিগারেশন লোড করার জন্য
+ollama==0.1.0          
+streamlit==1.26.1      
+numpy==1.27.5          
+pandas==2.1.1          
+requests==2.32.0       
+python-dotenv==1.0.1  
