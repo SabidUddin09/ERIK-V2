@@ -15,7 +15,7 @@ st.markdown("""
 **Developed by: Sabid**  
 
 Welcome to **ERIK**, your all-in-one academic assistant.  
-It automatically generates answers, analyzes topics, creates quizzes, flashcards, and links to Khan Academy resources — making studying smarter and faster.  
+It automatically generates answers, analyzes topics, creates quizzes, flashcards, and extracts notes — making studying smarter and faster.  
 """)
 
 # ---------------------------
@@ -114,8 +114,7 @@ else:
     st.sidebar.success(f"👋 Welcome, {st.session_state['username']}")
     option = st.sidebar.radio("Choose Feature", [
         "Introduction", "Doubt Solver", "Topic Analyzer",
-        "Document Upload", "Quiz Generator", "Flashcards",
-        "Khan Academy Reference"
+        "Document Upload", "Quiz Generator", "Flashcards"
     ])
 
     # ---------------------------
@@ -129,7 +128,6 @@ else:
         - Breaking down complex topics  
         - Creating quizzes & flashcards  
         - Extracting study notes from documents  
-        - Linking to Khan Academy resources  
         """)
 
     # ---------------------------
@@ -197,15 +195,6 @@ else:
                     st.write(f"**A{i+1}:** {s.strip()}")
         else:
             st.warning("⚠️ Upload notes first!")
-
-    # ---------------------------
-    # Khan Academy Reference
-    # ---------------------------
-    elif option == "Khan Academy Reference":
-        topic = st.text_input("Enter subject/topic:")
-        if st.button("Find Courses"):
-            st.subheader("🎥 Khan Academy Links")
-            st.write(f"🔗 [Search {topic} on Khan Academy](https://www.khanacademy.org/search?search_again=1&page_search_query={topic.replace(' ','+')})")
 
     # ---------------------------
     # Chat History
