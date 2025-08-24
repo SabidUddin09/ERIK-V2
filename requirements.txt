@@ -1,3 +1,4 @@
+ollama
 streamlit
-gpt4all
-googlesearch-python
+numpy
+pandas
