@@ -1,0 +1,3 @@
+streamlit
+gpt4all
+googlesearch-python
